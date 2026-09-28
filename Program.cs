@@ -164,7 +164,7 @@ namespace TaiwanPopularDevelopers
                 Type = RegionType.Taiwan,
                 Name = "Taiwan",
                 ChineseName = "台灣",
-                DirectoryName = "Taiwan",
+                DirectoryName = "taiwan",
                 SearchQueries = new string[]
                 {
                     $"followers:>{MinFollowers}+location:Taiwan",
@@ -1017,6 +1017,49 @@ namespace TaiwanPopularDevelopers
             }
         }
 
+        // 補充帳號由各區域的維護者確認歸屬；只略過搜尋條件，仍使用既有收錄與計分規則。
+        static async Task<List<string>> LoadAdditionalUserLogins()
+        {
+            var path = Path.Combine(currentRegion.DirectoryName, "additional-users.json");
+            if (!File.Exists(path))
+                return new List<string>();
+
+            var entries = Newtonsoft.Json.Linq.JArray.Parse(await File.ReadAllTextAsync(path, Encoding.UTF8));
+            var logins = new List<string>();
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var entry in entries)
+            {
+                var login = entry.Type == Newtonsoft.Json.Linq.JTokenType.String
+                    ? entry.ToString().Trim()
+                    : "";
+                if (!System.Text.RegularExpressions.Regex.IsMatch(login, @"\A[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,37}[a-zA-Z0-9])?\z"))
+                    throw new InvalidDataException($"{path} 必須是 GitHub 帳號字串陣列，不能包含空白帳號、網址或無效值。");
+
+                if (seen.Add(login))
+                    logins.Add(login);
+            }
+            return logins;
+        }
+
+        static async Task AddAdditionalUsers(List<GitHubUser> users, HashSet<string> processedUsers)
+        {
+            foreach (var login in await LoadAdditionalUserLogins())
+            {
+                if (processedUsers.Contains(login))
+                    continue;
+
+                var user = await GetUserDetail(login);
+                if (user == null)
+                    throw new InvalidOperationException($"無法取得補充帳號 {login} 的資料，請確認帳號、Token 與 API 狀態後重試。");
+
+                if (processedUsers.Add(user.Login))
+                {
+                    users.Add(user);
+                    Console.WriteLine($"加入補充候選帳號: {user.Login}（仍需通過專案分數條件）");
+                }
+            }
+        }
+
         static async Task Main(string[] args)
         {
             Console.WriteLine("GitHub用戶排名系統");
@@ -1091,8 +1134,9 @@ namespace TaiwanPopularDevelopers
             // 讀取GitHub API Token
             try
             {
-                githubToken = await File.ReadAllTextAsync(@"C:\Token");
-                githubToken = githubToken.Trim();
+                githubToken = Environment.GetEnvironmentVariable("GITHUB_TOKEN")?.Trim();
+                if (string.IsNullOrWhiteSpace(githubToken))
+                    githubToken = (await File.ReadAllTextAsync(@"C:\Token")).Trim();
                 Console.WriteLine("GitHub API Token 已載入");
             }
             catch (Exception ex)
@@ -1122,15 +1166,27 @@ namespace TaiwanPopularDevelopers
             }
 
             var allUsers = new List<GitHubUser>();
-            var processedUsers = new HashSet<string>();
+            var processedUsers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
             // 載入已完成的用戶資料
             Console.WriteLine("正在載入已完成的用戶資料...");
             var existingUsers = await LoadExistingUsers();
             foreach (var existingUser in existingUsers)
             {
-                allUsers.Add(existingUser);
-                processedUsers.Add(existingUser.Login);
+                if (processedUsers.Add(existingUser.Login))
+                    allUsers.Add(existingUser);
+            }
+
+            // 先驗證並補入人工候選帳號，設定或 API 有誤時保留原本的排名檔案。
+            try
+            {
+                await AddAdditionalUsers(allUsers, processedUsers);
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"載入補充帳號失敗: {ex.Message}");
+                Environment.ExitCode = 1;
+                return;
             }
 
             // 如果用戶選擇了跳過功能，顯示現有用戶列表供參考
@@ -1162,11 +1218,8 @@ namespace TaiwanPopularDevelopers
                     
                     foreach (var user in users)
                     {
-                        if (!processedUsers.Contains(user.Login))
-                        {
-                            processedUsers.Add(user.Login);
+                        if (processedUsers.Add(user.Login))
                             allUsers.Add(user);
-                        }
                     }
 
                     // 避免API限制，每次搜尋後稍作延遲
@@ -1221,10 +1274,10 @@ namespace TaiwanPopularDevelopers
                     
                     if (!shouldKeepUser)
                     {
-                        // 如果是組織用戶，從列表中移除
+                        // 移除組織或專案分數未達門檻的用戶
                         allUsers.RemoveAt(i);
                         i--; // 調整索引，因為列表大小改變了
-                        Console.WriteLine($"已從列表中移除組織用戶: {user.Login}");
+                        Console.WriteLine($"已從列表中移除未符合收錄條件的用戶: {user.Login}");
                     }
                     else
                     {
