@@ -2980,7 +2980,7 @@ namespace TaiwanPopularDevelopers
             sb.AppendLine("> - 追蹤數 > 100");
             sb.AppendLine("> - 組織專案、其他專案貢獻分數公式 = 排名百分比 * star/fork = ((總人數-排名+1)/總人數) * star/fork");
             sb.AppendLine("> - 不能只有追蹤，沒有其他專案 star 或是 fork (要求其他分數加起來>10)");
-            sb.AppendLine("> - 因為欄位有限，顯示只取前幾名專案，完整專案資料可以看 User.json 資料集");
+            sb.AppendLine("> - 個人專案、組織貢獻專案及其他貢獻專案，各依 Star + Fork 數由高到低取最多 5 個，用於顯示與計分；所有已收集的專案資料可查看 Users.json 資料集");
             sb.AppendLine();
             sb.AppendLine($"**更新時間**: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
             sb.AppendLine($"**總計用戶數**: {users.Count}");
